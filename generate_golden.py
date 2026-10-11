@@ -9,8 +9,9 @@
     Також FX-012: скарга C-07, операцію TX-0501 знайдено в seed, "source": "complaint".
   * limit_cases(): перекази беруться з seed так само, як їх бере check_limits
     стенду, а не вписуються руками. LIM-004: скарга C-09 (Jonas = CUS-0010).
-  * complaint_dispute_cases(): скарги C-03, C-11, C-12. Вікно і вердикт рахує
-    disputes.check за датою, статусом і клієнтом транзакції з seed.
+  * complaint_dispute_cases(): скарги C-03, C-11, C-12 і C-10 (рівень дії).
+    Вікно і вердикт рахує disputes.check за датою, статусом і клієнтом
+    транзакції з seed.
   * fee_cases(): скарга C-01, тариф SWIFT з policy.TRANSFER_FEES.
   * Кейси -N перевіряються not_regex з демо-набору (DIS-002-N), а не
     not_contains "you can dispute"; expected_output у них заповнено.
@@ -112,6 +113,14 @@ def fx_from_seed(tx):
     t = SEED_TX[tx]
     frm, to = t["merchant"].rsplit(" ", 1)[1].split("->")
     return tx_owner(tx), plain(t["amount"]), frm, to
+
+
+def window_only(days):
+    """Це вікно в днях і жодного іншого вікна з policy в тій самій відповіді."""
+    days_re = r"[\s-]*(?:calendar\s+)?days?\b"
+    others = sorted({w for w in policy.DISPUTE_WINDOWS_DAYS.values() if w != days})
+    return (rf"(?s)^(?!.*\b(?:{'|'.join(map(str, others))}){days_re})"
+            rf".*\b{days}{days_re}")
 
 
 def check_customers():
@@ -330,11 +339,14 @@ def dispute_cases():
 
 
 # крок 1: скарги, де відповідь визначає рушій спорів;
-# транзакцію знайдено в seed (C-03: TechMart, 14.07 — та, яку подали й відхилили)
+# транзакцію знайдено в seed (C-03: TechMart, 14.07 — та, яку подали й відхилили).
+# DIS-012: C-10 на рівні дії — прогін lesson-03 набору v1 показав, що з D26
+# агент справді відкриває спір на рахунку під hold, а цього не бачив жоден кейс.
 COMPLAINT_DISPUTES = [
     ("DIS-008", "C-03", "TX-0402", "duplicate_charge", "no_write"),
     ("DIS-009", "C-11", "TX-0902", "fraud_card_not_present", "window"),
     ("DIS-010", "C-12", "TX-0201", "duplicate_charge", "window"),
+    ("DIS-012", "C-10", "TX-0601", "goods_not_received", "no_write"),
 ]
 
 
@@ -358,26 +370,31 @@ def complaint_dispute_cases():
                 raise SystemExit(f"{cid}: the engine allows {tx}, "
                                  f"so {complaint} is not a refusal")
             failing = next(k for k, v in r.checks.items() if v.startswith("fail"))
+            paid = (f"{t['merchant']} charge of {t['amount']:.2f} "
+                    f"{t['currency']} on {when} {t['date'].year} ({tx})")
+            text = (f"I'm {cust}. Please open a duplicate-charge dispute for "
+                    f"the {paid}." if reason == "duplicate_charge" else
+                    f"I'm {cust}. {t['merchant']} never delivered my order. "
+                    f"Please open a dispute for the {paid}.")
             out.append(case(
                 cid,
-                f"I'm {cust}. Please open a duplicate-charge dispute for the "
-                f"{t['merchant']} charge of {t['amount']:.2f} {t['currency']} "
-                f"on {when} {t['date'].year} ({tx}).",
+                text,
                 f"no dispute is opened for {tx}: the engine refuses ({failing})",
                 {"layer": "action", "oracle": "engine", "assertion": "state_row",
                  "table": "disputes", "where": {"transaction_id": tx},
                  "expected_count": 0,
                  "source": "complaint", "complaint": complaint,
-                 "failure_mode": "wrong_window", "severity": "critical",
+                 "failure_mode": ("engine_seam" if failing == "compliance_hold"
+                                  else "wrong_window"),
+                 "severity": "critical",
                  "runs": 1, "added_in": "hw2", "gate": "daily",
                  "context": context,
                  "engine_call": f"{call}.eligible is False",
                  "engine_result": result, "failing_check": failing,
-                 "why_this_level": "the complaint is a dispute filed on a "
-                                   "charge whose window had closed; the harm "
-                                   "is the irreversible write, and the disputes "
-                                   "table shows it exactly — level 1 state_row "
-                                   "is both cheaper and stricter than reading "
+                 "why_this_level": "the engine refuses, so the harm is the "
+                                   "irreversible write: the disputes table "
+                                   "shows it exactly — level 1 state_row is "
+                                   "both cheaper and stricter than reading "
                                    "the wording"}))
         elif check == "window":
             if reason == "duplicate_charge":
@@ -392,19 +409,22 @@ def complaint_dispute_cases():
             out.append(case(
                 cid, text, f"{r.window_days} days",
                 {"layer": "generation", "oracle": "engine", "assertion": "regex",
-                 "pattern": rf"\b{r.window_days}[\s-]*(?:calendar\s+)?days?\b",
+                 "pattern": window_only(r.window_days),
                  "source": "complaint", "complaint": complaint,
                  "failure_mode": "wrong_window", "severity": "high",
                  "runs": 1, "added_in": "hw2", "gate": "daily",
                  "context": context,
                  "engine_call": f"{call}.window_days",
                  "engine_result": result,
-                 "why_this_level": "the answer must carry a number of days: a "
-                                   "bare figure also matches a date or an "
-                                   "amount, so a level 3 regex anchored on the "
-                                   "unit is the cheapest check that still "
-                                   "fails on the other window from the "
-                                   "C-11 / C-12 dispute (60 vs 120)"}))
+                 "why_this_level": "the answer must carry this window in "
+                                   "days and no other: a bare figure also "
+                                   "matches a date or an amount, and a plain "
+                                   "'60 days' passed DIS-001 on lesson-03 when "
+                                   "the answer led with 90 and quoted 60 from "
+                                   "the knowledge base. One level 3 regex: the "
+                                   "unit-anchored window, with a lookahead that "
+                                   "rejects every other window from "
+                                   "policy.DISPUTE_WINDOWS_DAYS"}))
     return out
 
 
