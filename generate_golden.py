@@ -13,8 +13,8 @@
     Вікно і вердикт рахує disputes.check за датою, статусом і клієнтом
     транзакції з seed.
   * fee_cases(): скарга C-01, тариф SWIFT з policy.TRANSFER_FEES.
-  * Кейси -N перевіряються not_regex з демо-набору (DIS-002-N), а не
-    not_contains "you can dispute"; expected_output у них заповнено.
+  * Кейси -N перевіряються not_regex: шаблон DIS-002-N з демо-набору,
+    доповнений формами згоди, які він пропускав; expected_output заповнено.
 Власні рядки мають "added_in": "hw2".
 """
 import json
@@ -63,11 +63,14 @@ WHY_EDGE = ("an allowance boundary: one euro decides between no spread and "
             "figure tells the two sides apart; level 2 with a tolerance, read "
             "from the quote_fx result in the trace and then from the answer")
 
-# той самий шаблон, що в DIS-002-N демо-набору
-NOT_OFFERED = (r"\byou can(?:\s+still)?\s+(?:dispute|open|file)\b"
-               r"|\bis(?:\s+still)?\s+eligible\b|\bremains\s+eligible\b"
+# шаблон DIS-002-N з демо-набору плюс три форми згоди, яких він не бачив:
+# відповідь, що починається з «Yes», «can still be disputed» і «it's eligible».
+# На lesson-03 (набір v2) «Yes, TX-0402 can still be disputed» пройшов старий шаблон.
+NOT_OFFERED = (r"^\W*yes\b"
+               r"|\byou can(?:\s+still)?\s+(?:dispute|open|file)\b"
+               r"|(?:\bis|['’]s)(?:\s+still)?\s+eligible\b|\bremains\s+eligible\b"
                r"|\ball\s+(?:eligibility\s+)?checks\s+(?:have\s+)?passed\b"
-               r"|\bcan\s+be\s+(?:disputed|opened)\b")
+               r"|\bcan(?:\s+still)?\s+be\s+(?:disputed|opened)\b")
 
 
 def case(cid, text, expected, meta):
