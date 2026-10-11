@@ -23,6 +23,8 @@
 
 Версії: стенд `paypilot-stand-shared` @ `41cb846` (агент `claude-haiku-5-5`), кіт `paypilot-l03-eval` @ `b9ee5fb`.
 
+На чистому клоні кіту (`b9ee5fb`, без жодних змін) з покладеним `golden.jsonl`: `--dry-run` дає той самий `set_hash`, генератор запускається, а прогін `--set golden --profile clean` доходить до кінця й пише звіт. Кейси `release` (TON-*) у щоденний прогін не входять, тож суддя для нього не потрібен.
+
 У мене Docker Compose 2.23, а він не читає `env_file: … required: false` з `docker-compose.yml` кіту. Тому всі прогони йшли через `docker run`: образ, томи і змінні ті самі, що в сервісі `eval`, разом із `GATE=daily` за замовчуванням. Команду запускаю з каталогу кіту, стенд лежить у `../paypilot-stand`:
 
     docker run --rm --env-file .env -e SET=golden -e GATE=daily -e CASE= -e PYTHONDONTWRITEBYTECODE=1 -e SERVICE_URL=http://host.docker.internal:8000 --add-host host.docker.internal:host-gateway -v "$PWD":/course/solutions/evals -v "$PWD/../paypilot-stand/app":/course/app:ro -w /course/solutions/evals --entrypoint python python:3.12-slim cli.py --set golden --profile clean
@@ -119,7 +121,7 @@ C-11 і C-12 суперечать одна одній лише на перший
 | --- | --- | --- | --- |
 | Baseline | `clean` | 32/32 | [`reports/golden-clean-20261011T205301.json`](reports/golden-clean-20261011T205301.json) |
 | Дефектна система | `lesson-03` | 12/32 | [`reports/golden-lesson-03-20261011T205656.json`](reports/golden-lesson-03-20261011T205656.json) |
-| Зміна промпту | `clean` + рядок | _прогін 3 ще не робився_ | |
+| Зміна промпту | `clean` + рядок | 32/32 | [`reports/golden-clean-20261011T210346.json`](reports/golden-clean-20261011T210346.json) |
 
 Кейси з `gate: release` у прогін не входять, тому M менше за розмір набору (32 з 37).
 
@@ -139,9 +141,13 @@ C-11 і C-12 суперечать одна одній лише на перший
   - DIS-004-N, DIS-011, DIS-012: hold блокує спір незалежно від вікна.
 - Контроль, не зміниться: 14 FX, 4 LIM, CMP-003, CMP-006, FEE-001 (21 кейс). Рядок не стосується конвертацій, лімітів і тарифів.
 
-Коміт із прогнозом: _hash цього коміту допишу після прогону 3_
+Коміт із прогнозом: [`c8be668`](https://github.com/iper1305/paypilot-dz2/commit/c8be6683019b607a224de9a0c69147a5550e42bf). Закомічено о 21:00:50 UTC і одразу запушено. Прогін 3 почався після цього й закінчився о 21:03:46 UTC (`ran_at` у звіті).
 
-Що впало: _після прогону 3_
+Що впало: нічого, 32/32.
+
+Розбіжність із прогнозом: я чекала 30/32 (CMP-004 і DIS-010), а агент рядок просто не застосував. Жодна з 32 відповідей не назвала 120 днів для подвійного списання. CMP-004 відповів дослівно як у baseline («You have 60 days from the transaction date to dispute a duplicate charge»), DIS-010 — «You have **60 days**… the deadline is **7 November 2026**». Пояснення — у самому промпті, розділ 3: «Answer only from tool results and knowledge-base fragments… If a figure… is not present in a tool result or a retrieved fragment, do not state it». Агент для кожного питання про вікно пішов в інструмент або в базу знань (CMP-004 — `search_knowledge_base`; DIS-001, DIS-002-N, DIS-010 — `check_dispute_eligibility`), а там 60. Число 120 з'являлося лише в системному промпті, тож правило «цифри лише з джерел» його відсікло. Я недооцінила, наскільки розділ 3 захищає від фактичних правок у промпті. Тому рядок, що суперечить джерелам, — поганий тест чутливості, детальніше в [`residual-risk.md`](residual-risk.md), розділ 3.
+
+Що рядок справді діяв, видно в `/api/_test/prompt`: до і після прогону він був у тексті промпту (3,308 символів замість 3,243). Стенд збирає промпт на кожен запит (`prompt.build()` у `app/agent/loop.py`). Повернула промпт `docker compose up -d --force-recreate stand`: знову 3,243 символи, файл на хості не змінювався. Мітка `prompt_version` в усіх трьох звітах — `base.v1`, бо вона від правки файлу не змінюється. Відрізнити прогін 3 від baseline можна лише за часом і цим README.
 
 Дефекти профілю `lesson-03` (D19, D20, D21, D22, D26):
 - зловив:
